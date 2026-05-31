@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lingo CGM Cleaner &amp; Meal Detector</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2129; --panel2:#222c36; --ink:#e8eef4;
+    --muted:#9fb0c0; --line:#2c3a47; --accent:#4ea1ff; --good:#39c07a;
+    --warn:#ffb454; --bad:#ff6b6b; --meal:#c77dff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--panel)}
+  h1{margin:0;font-size:20px}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  main{padding:20px 24px;max-width:1200px;margin:0 auto}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:16px;margin-bottom:16px}
+  .card h2{margin:0 0 12px;font-size:15px;color:var(--accent)}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input[type=number]{width:90px;background:var(--panel2);border:1px solid var(--line);
+        color:var(--ink);border-radius:6px;padding:6px 8px;font-size:14px}
+  .ctl{display:flex;flex-direction:column}
+  .ctls{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end}
+  button{background:var(--accent);color:#06223f;border:0;border-radius:7px;
+        padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  button.ghost{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:28px;text-align:center;
+        color:var(--muted);cursor:pointer;transition:.15s}
+  .drop:hover,.drop.over{border-color:var(--accent);color:var(--ink);background:var(--panel2)}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .stat{background:var(--panel2);border-radius:8px;padding:12px}
+  .stat .v{font-size:22px;font-weight:700}
+  .stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .pill.good{background:rgba(57,192,122,.15);color:var(--good)}
+  .pill.warn{background:rgba(255,180,84,.15);color:var(--warn)}
+  .pill.bad{background:rgba(255,107,107,.15);color:var(--bad)}
+  .pill.meal{background:rgba(199,125,255,.15);color:var(--meal)}
+  canvas{width:100%;display:block;border-radius:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+  .scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:8px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .hide{display:none}
+  small.note{color:var(--muted)}
+  a.dl{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Lingo CGM Cleaner &amp; Meal Detector</h1>
+  <p>Parses an Abbott Lingo glucose export, removes unreliable start-up / warm-up data,
+     and flags likely meal (food-intake) time points — all in your browser. No data leaves this page.</p>
+</header>
+
+<main>
+  <div class="card">
+    <h2>1. Load your Lingo CSV</h2>
+    <div id="drop" class="drop">
+      Drop your <b>lingoglucosedata….csv</b> here, or click to choose a file.
+    </div>
+    <input id="file" type="file" accept=".csv,text/csv" class="hide">
+    <p id="loadmsg" style="margin:10px 0 0" class="hide"></p>
+  </div>
+
+  <div id="config" class="card hide">
+    <h2>2. Cleaning &amp; detection settings</h2>
+    <div class="ctls">
+      <div class="ctl"><label>Warm-up to drop per sensor (hours)</label>
+        <input id="warmup" type="number" value="12" min="0" step="0.5"></div>
+      <div class="ctl"><label>New-sensor gap threshold (min)</label>
+        <input id="gap" type="number" value="20" min="5" step="5"></div>
+      <div class="ctl"><label>Valid glucose min (mg/dL)</label>
+        <input id="lo" type="number" value="40" min="0"></div>
+      <div class="ctl"><label>Valid glucose max (mg/dL)</label>
+        <input id="hi" type="number" value="400" min="0"></div>
+      <div class="ctl"><label>Meal rise threshold (mg/dL)</label>
+        <input id="rise" type="number" value="30" min="5"></div>
+      <div class="ctl"><label>Meal rise window (min)</label>
+        <input id="window" type="number" value="60" min="15" step="5"></div>
+      <div class="ctl"><label>Compare Week 1 vs Week #</label>
+        <input id="weekN" type="number" value="2" min="2" step="1"></div>
+      <div class="ctl"><button id="run">Clean &amp; analyze</button></div>
+    </div>
+    <p style="margin:12px 0 0"><small class="note">
+      <b>Warm-up:</b> readings within the first <i>N</i> hours after each sensor starts are
+      discarded — Abbott itself hides the first ~1 h and accuracy is poor early on.
+      <b>Range:</b> values outside the sensor's reportable range are treated as errors.
+      <b>Meal:</b> a sustained rise of ≥ threshold within the window marks a probable eating event.
+    </small></p>
+  </div>
+
+  <div id="results" class="hide">
+    <div class="card">
+      <h2>3. Summary</h2>
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. Glucose trace</h2>
+      <div class="legend">
+        <span><i style="background:var(--good)"></i>Clean reading</span>
+        <span><i style="background:var(--warn)"></i>Dropped — warm-up</span>
+        <span><i style="background:var(--bad)"></i>Dropped — out of range</span>
+        <span><i style="background:var(--meal)"></i>Detected meal onset</span>
+      </div>
+      <canvas id="chart" height="340"></canvas>
+    </div>
+
+    <div class="row">
+      <div class="card" style="flex:1;min-width:340px">
+        <h2>5. Detected meals <span id="mealcount" class="pill meal"></span></h2>
+        <div class="scroll">
+          <table id="meals"><thead><tr>
+            <th>#</th><th>Start</th><th>Baseline</th><th>Peak</th><th>Rise</th><th>Time-to-peak</th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card" style="flex:1;min-width:340px">
+        <h2>6. Removed rows <span id="badcount" class="pill bad"></span></h2>
+        <div class="scroll">
+          <table id="bad"><thead><tr>
+            <th>Timestamp</th><th>Value</th><th>Reason</th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>7. Week comparison <span id="weekrange" class="pill good"></span></h2>
+      <p><small class="note">Week 1 is the first 7 days of clean data; Week&nbsp;N is the
+        chosen later week. Use this to contrast, e.g., an off-meds week with an on-meds week.</small></p>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Week 1</span>
+        <span><i style="background:var(--meal)"></i>Week N</span>
+      </div>
+      <canvas id="wchart" height="260"></canvas>
+      <div class="scroll" style="margin-top:12px">
+        <table id="wtable"><thead><tr>
+          <th>Metric</th><th>Week 1</th><th>Week N</th><th>Δ (N − 1)</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+      <div style="margin-top:12px">
+        <button id="dlW1" class="ghost">⬇ Week 1 CSV</button>
+        <button id="dlWN" class="ghost">⬇ Week N CSV</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>8. Export</h2>
+      <p>Download the cleaned series (warm-up &amp; invalid rows removed) and the meal list.</p>
+      <button id="dlClean" class="ghost">⬇ Cleaned CSV</button>
+      <button id="dlMeals" class="ghost">⬇ Meals CSV</button>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+/* ---------- state ---------- */
+let RAW = [];        // {t:Date, raw:string, v:number}
+let CLEAN = [];      // kept readings {t,v,session}
+let REMOVED = [];    // {t,v,reason}
+let MEALS = [];      // {start:Date, baseline, peak, peakT, rise, ttp}
+let SESSIONS = [];   // {start, end, idx}
+
+/* ---------- parsing ---------- */
+// Lingo rows look like: 2026-05-30T17:31-04:00,93
+function parseCSV(text){
+  const out=[];
+  const lines=text.split(/\r?\n/);
+  for(const line of lines){
+    if(!line.trim()) continue;
+    const parts=line.split(",");
+    if(parts.length<2) continue;
+    const ts=parts[0].trim();
+    const val=parseFloat(parts[parts.length-1].trim());
+    // skip header / non-data rows
+    const d=parseTs(ts);
+    if(!d || isNaN(val)) continue;
+    out.push({t:d, raw:ts, v:val});
+  }
+  out.sort((a,b)=>a.t-b.t);   // oldest first
+  return out;
+}
+// Robust ISO parse incl. "+/-HH:MM" offset (JS Date handles it natively)
+function parseTs(s){
+  const d=new Date(s);
+  return isNaN(d.getTime())?null:d;
+}
+
+/* ---------- session split (gap = new sensor / warm-up) ---------- */
+function findSessions(data, gapMin){
+  const s=[]; let start=0;
+  for(let i=1;i<data.length;i++){
+    const dm=(data[i].t-data[i-1].t)/60000;
+    if(dm>gapMin){ s.push({start, end:i-1}); start=i; }
+  }
+  s.push({start, end:data.length-1});
+  return s;
+}
+
+/* ---------- cleaning ---------- */
+function clean(){
+  const warmupH=+v("warmup"), gapMin=+v("gap"), lo=+v("lo"), hi=+v("hi");
+  CLEAN=[]; REMOVED=[];
+  SESSIONS=findSessions(RAW, gapMin);
+  RAW.forEach(r=>r._sess=-1);
+  SESSIONS.forEach((sess,si)=>{
+    const sStart=RAW[sess.start].t;
+    const warmEnd=new Date(sStart.getTime()+warmupH*3600*1000);
+    for(let i=sess.start;i<=sess.end;i++){
+      const r=RAW[i]; r._sess=si;
+      if(r.v<lo || r.v>hi){ REMOVED.push({t:r.t,v:r.v,reason:"out of range ("+lo+"–"+hi+")"}); r._drop="bad"; }
+      else if(r.t<warmEnd){ REMOVED.push({t:r.t,v:r.v,reason:"warm-up (sensor "+(si+1)+")"}); r._drop="warm"; }
+      else { CLEAN.push({t:r.t,v:r.v,session:si}); r._drop=null; }
+    }
+  });
+}
+
+/* ---------- meal detection ----------
+   For each clean reading, look ahead within the window. If glucose climbs by
+   >= riseThresh from a local baseline to a peak, flag the baseline point as a
+   meal onset. Merge onsets that fall inside the same excursion so one meal
+   isn't counted many times. Works per-session (won't bridge sensor gaps).      */
+function detectMeals(){
+  const riseThresh=+v("rise"), winMin=+v("window");
+  MEALS=[];
+  // group clean readings by session for contiguity
+  const bySess={};
+  CLEAN.forEach(r=>{ (bySess[r.session]=bySess[r.session]||[]).push(r); });
+  for(const k in bySess){
+    const arr=bySess[k];
+    let lastPeakT=-Infinity;
+    for(let i=0;i<arr.length;i++){
+      const base=arr[i];
+      if(base.t.getTime()<lastPeakT) continue;        // still inside previous excursion
+      // find peak within window
+      let peak=base, peakIdx=i;
+      for(let j=i+1;j<arr.length;j++){
+        const dm=(arr[j].t-base.t)/60000;
+        if(dm>winMin) break;
+        if(arr[j].v>peak.v){ peak=arr[j]; peakIdx=j; }
+        if(arr[j].v<base.v){ break; }                 // dipped below baseline -> not the onset
+      }
+      const rise=peak.v-base.v;
+      if(rise>=riseThresh && peakIdx>i){
+        MEALS.push({
+          start:base.t, baseline:base.v, peak:peak.v, peakT:peak.t,
+          rise:rise, ttp:Math.round((peak.t-base.t)/60000)
+        });
+        lastPeakT=peak.t.getTime();                   // don't re-detect inside this rise
+        i=peakIdx;                                    // jump past the peak
+      }
+    }
+  }
+}
+
+/* ---------- stats ---------- */
+function fmtPct(x){return (x*100).toFixed(1)+"%";}
+function buildStats(){
+  const g=CLEAN.map(r=>r.v);
+  const n=g.length, mean=g.reduce((a,b)=>a+b,0)/n;
+  const sd=Math.sqrt(g.reduce((a,b)=>a+(b-mean)**2,0)/n);
+  const cv=sd/mean;
+  const gmi=3.31+0.02392*mean;                        // GMI(%) from mean mg/dL
+  const tir=g.filter(x=>x>=70&&x<=180).length/n;
+  const days=(CLEAN[n-1].t-CLEAN[0].t)/86400000;
+  const cards=[
+    ["Sensors detected", SESSIONS.length],
+    ["Readings kept", n.toLocaleString()],
+    ["Rows removed", REMOVED.length.toLocaleString()],
+    ["Days of data", days.toFixed(1)],
+    ["Mean glucose", mean.toFixed(0)+" mg/dL"],
+    ["Std dev", sd.toFixed(0)+" mg/dL"],
+    ["CV", fmtPct(cv)],
+    ["GMI (est. A1c)", gmi.toFixed(1)+"%"],
+    ["Time in range 70–180", fmtPct(tir)],
+    ["Meals detected", MEALS.length],
+  ];
+  document.getElementById("stats").innerHTML=cards.map(c=>
+    `<div class="stat"><div class="v">${c[1]}</div><div class="k">${c[0]}</div></div>`).join("");
+}
+
+/* ---------- week slicing & comparison ---------- */
+let WEEK1=[], WEEKN=[], WEEKN_NUM=2;
+function weekStart(){ return CLEAN.length ? CLEAN[0].t.getTime() : 0; }
+// readings whose offset from data-start falls in week `n` (1-based, 7-day blocks)
+function sliceWeek(n){
+  const t0=weekStart(), a=t0+(n-1)*7*86400000, b=t0+n*7*86400000;
+  return CLEAN.filter(r=>r.t.getTime()>=a && r.t.getTime()<b);
+}
+function weekMetrics(arr){
+  if(!arr.length) return null;
+  const g=arr.map(r=>r.v), n=g.length, mean=g.reduce((a,b)=>a+b,0)/n;
+  const sd=Math.sqrt(g.reduce((a,b)=>a+(b-mean)**2,0)/n);
+  return {
+    n, mean, sd, cv:sd/mean, gmi:3.31+0.02392*mean,
+    tir:g.filter(x=>x>=70&&x<=180).length/n,
+    lo:g.filter(x=>x<70).length/n, hi:g.filter(x=>x>180).length/n,
+    min:Math.min(...g), max:Math.max(...g)
+  };
+}
+function buildWeeks(){
+  WEEKN_NUM=Math.max(2,+v("weekN")||2);
+  WEEK1=sliceWeek(1); WEEKN=sliceWeek(WEEKN_NUM);
+  const m1=weekMetrics(WEEK1), mn=weekMetrics(WEEKN);
+  const start=new Date(weekStart());
+  const wnStart=new Date(weekStart()+(WEEKN_NUM-1)*7*86400000);
+  document.getElementById("weekrange").textContent=
+    `W1 from ${fmtDay(start)} · W${WEEKN_NUM} from ${fmtDay(wnStart)}`;
+  const rows=[
+    ["Readings","n", x=>x.n],
+    ["Mean glucose","mg/dL", x=>x.mean.toFixed(0)],
+    ["Std dev","mg/dL", x=>x.sd.toFixed(0)],
+    ["CV","%", x=>(x.cv*100).toFixed(1)],
+    ["GMI (est. A1c)","%", x=>x.gmi.toFixed(1)],
+    ["Time in range 70–180","%", x=>(x.tir*100).toFixed(1)],
+    ["Time below 70","%", x=>(x.lo*100).toFixed(1)],
+    ["Time above 180","%", x=>(x.hi*100).toFixed(1)],
+    ["Min / Max","mg/dL", x=>x.min+" / "+x.max],
+  ];
+  const tb=document.querySelector("#wtable tbody");
+  if(!m1||!mn){
+    tb.innerHTML=`<tr><td colspan="4"><small class="note">Not enough clean data for
+      Week 1 and Week ${WEEKN_NUM}. Lower the week number or check the date span.</small></td></tr>`;
+  } else {
+    tb.innerHTML=rows.map(r=>{
+      const a=r[2](m1), b=r[2](mn);
+      let delta="";
+      const na=parseFloat(a), nb=parseFloat(b);
+      if(!isNaN(na)&&!isNaN(nb)&&r[0]!=="Min / Max"){
+        const d=nb-na; delta=(d>=0?"+":"")+d.toFixed(r[1]==="%"?1:0);
+      }
+      return `<tr><td>${r[0]} <small class="note">${r[1]==="n"?"":r[1]}</small></td>
+        <td>${a}</td><td>${b}</td><td>${delta}</td></tr>`;
+    }).join("");
+  }
+  drawWeeks();
+}
+function fmtDay(d){const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;}
+// overlay both weeks on a shared 0–7 day x-axis (aligned by day-into-week)
+function drawWeeks(){
+  const cv=document.getElementById("wchart");
+  const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=260;
+  cv.width=W*dpr; cv.height=H*dpr;
+  const ctx=cv.getContext("2d"); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
+  const padL=44,padR=12,padT=12,padB=22;
+  const all=WEEK1.concat(WEEKN);
+  const vhi=all.length?Math.max(200,...all.map(r=>r.v))+10:250, vlo=40;
+  const X=day=>padL+(day/7)*(W-padL-padR);
+  const Y=val=>padT+(1-(val-vlo)/(vhi-vlo))*(H-padT-padB);
+  ctx.fillStyle="rgba(57,192,122,.08)";
+  ctx.fillRect(padL,Y(180),W-padL-padR,Y(70)-Y(180));
+  ctx.strokeStyle="#2c3a47"; ctx.fillStyle="#9fb0c0"; ctx.font="11px sans-serif";
+  [55,100,150,200,250,300].forEach(gv=>{ if(gv>vhi)return;
+    ctx.beginPath();ctx.moveTo(padL,Y(gv));ctx.lineTo(W-padR,Y(gv));ctx.stroke();
+    ctx.fillText(gv,6,Y(gv)+3); });
+  for(let d=1;d<7;d++){ ctx.fillText("d"+d,X(d)-6,H-7); }
+  const plot=(arr,color)=>{
+    if(!arr.length) return;
+    const t0=arr[0].t.getTime();
+    ctx.strokeStyle=color; ctx.lineWidth=1; ctx.beginPath();
+    let pen=false, prevT=null;
+    for(const r of arr){
+      const day=(r.t.getTime()-t0)/86400000, x=X(day), y=Y(r.v);
+      const brk=prevT && (r.t-prevT)/60000>15;
+      if(!pen||brk){ctx.moveTo(x,y);pen=true;} else ctx.lineTo(x,y);
+      prevT=r.t;
+    }
+    ctx.stroke();
+  };
+  plot(WEEK1,"#4ea1ff"); plot(WEEKN,"#c77dff");
+}
+function weekCSV(arr){
+  let s="Time of Glucose Reading,Measurement(mg/dL),Sensor\n";
+  arr.forEach(r=>{ s+=r.t.toISOString()+","+r.v+","+(r.session+1)+"\n"; });
+  return s;
+}
+
+/* ---------- chart (vanilla canvas) ---------- */
+function draw(){
+  const cv=document.getElementById("chart");
+  const dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth, H=340;
+  cv.width=W*dpr; cv.height=H*dpr;
+  const ctx=cv.getContext("2d"); ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,W,H);
+  const padL=44,padR=12,padT=12,padB=24;
+  const t0=RAW[0].t.getTime(), t1=RAW[RAW.length-1].t.getTime();
+  const vlo=40, vhi=Math.max(200, ...RAW.map(r=>r.v))+10;
+  const X=t=>padL+(t-t0)/(t1-t0)*(W-padL-padR);
+  const Y=v=>padT+(1-(v-vlo)/(vhi-vlo))*(H-padT-padB);
+  // gridlines + target band 70-180
+  ctx.fillStyle="rgba(57,192,122,.08)";
+  ctx.fillRect(padL,Y(180),W-padL-padR,Y(70)-Y(180));
+  ctx.strokeStyle="#2c3a47"; ctx.fillStyle="#9fb0c0"; ctx.font="11px sans-serif";
+  [55,100,150,200,250,300].forEach(gv=>{
+    if(gv>vhi) return;
+    ctx.beginPath();ctx.moveTo(padL,Y(gv));ctx.lineTo(W-padR,Y(gv));ctx.stroke();
+    ctx.fillText(gv,6,Y(gv)+3);
+  });
+  // dropped points (warm-up / out of range)
+  for(const r of RAW){
+    if(!r._drop) continue;
+    ctx.fillStyle = r._drop==="bad" ? "#ff6b6b" : "#ffb454";
+    ctx.fillRect(X(r.t)-1,Y(r.v)-1,2,2);
+  }
+  // clean line
+  ctx.strokeStyle="#39c07a"; ctx.lineWidth=1; ctx.beginPath();
+  let pen=false, prevSess=-1, prevT=null;
+  for(const r of CLEAN){
+    const x=X(r.t), y=Y(r.v);
+    const brk = prevSess!==r.session || (prevT && (r.t-prevT)/60000>15);
+    if(!pen||brk){ctx.moveTo(x,y);pen=true;} else ctx.lineTo(x,y);
+    prevSess=r.session; prevT=r.t;
+  }
+  ctx.stroke();
+  // meal markers
+  for(const m of MEALS){
+    const x=X(m.start), y=Y(m.baseline);
+    ctx.fillStyle="#c77dff";
+    ctx.beginPath();ctx.arc(x,y,3.2,0,7);ctx.fill();
+    ctx.strokeStyle="rgba(199,125,255,.5)";ctx.beginPath();
+    ctx.moveTo(x,padT);ctx.lineTo(x,H-padB);ctx.stroke();
+  }
+  // x labels (date ticks)
+  ctx.fillStyle="#9fb0c0";
+  const dayMs=86400000, span=t1-t0, step=span>10*dayMs?2*dayMs:dayMs;
+  for(let t=Math.ceil(t0/dayMs)*dayMs;t<t1;t+=step){
+    const d=new Date(t);
+    ctx.fillText((d.getMonth()+1)+"/"+d.getDate(), X(t)-8, H-8);
+  }
+}
+
+/* ---------- tables ---------- */
+function fmtDT(d){
+  const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function buildTables(){
+  const mt=document.querySelector("#meals tbody");
+  mt.innerHTML=MEALS.map((m,i)=>
+    `<tr><td>${i+1}</td><td>${fmtDT(m.start)}</td><td>${m.baseline}</td>
+     <td>${m.peak}</td><td>+${m.rise}</td><td>${m.ttp} min</td></tr>`).join("")
+    || `<tr><td colspan="6"><small class="note">No meals matched the threshold.</small></td></tr>`;
+  document.getElementById("mealcount").textContent=MEALS.length+" found";
+
+  const bt=document.querySelector("#bad tbody");
+  bt.innerHTML=REMOVED.map(r=>
+    `<tr><td>${fmtDT(r.t)}</td><td>${r.v}</td><td>${r.reason}</td></tr>`).join("")
+    || `<tr><td colspan="3"><small class="note">Nothing removed.</small></td></tr>`;
+  document.getElementById("badcount").textContent=REMOVED.length+" removed";
+}
+
+/* ---------- export ---------- */
+function download(name, text){
+  const blob=new Blob([text],{type:"text/csv"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function cleanCSV(){
+  let s="Time of Glucose Reading,Measurement(mg/dL),Sensor\n";
+  CLEAN.forEach(r=>{ s+=r.t.toISOString()+","+r.v+","+(r.session+1)+"\n"; });
+  return s;
+}
+function mealsCSV(){
+  let s="Meal #,Onset,Baseline mg/dL,Peak mg/dL,Rise mg/dL,Time-to-peak min\n";
+  MEALS.forEach((m,i)=>{ s+=`${i+1},${m.start.toISOString()},${m.baseline},${m.peak},${m.rise},${m.ttp}\n`; });
+  return s;
+}
+
+/* ---------- glue ---------- */
+const v=id=>document.getElementById(id).value;
+function show(id){document.getElementById(id).classList.remove("hide");}
+
+function loadText(text){
+  RAW=parseCSV(text);
+  const msg=document.getElementById("loadmsg");
+  msg.classList.remove("hide");
+  if(!RAW.length){ msg.innerHTML=`<span class="pill bad">No valid rows found</span>`; return; }
+  msg.innerHTML=`<span class="pill good">Loaded ${RAW.length.toLocaleString()} readings</span>
+    &nbsp; ${fmtDT(RAW[0].t)} → ${fmtDT(RAW[RAW.length-1].t)}`;
+  show("config");
+  run();
+}
+function run(){
+  if(!RAW.length) return;
+  clean(); detectMeals();
+  show("results"); buildStats(); buildTables(); draw(); buildWeeks();
+}
+
+document.getElementById("run").addEventListener("click",run);
+window.addEventListener("resize",()=>{ if(CLEAN.length){ draw(); drawWeeks(); } });
+document.getElementById("dlClean").addEventListener("click",()=>download("lingo_cleaned.csv",cleanCSV()));
+document.getElementById("dlMeals").addEventListener("click",()=>download("lingo_meals.csv",mealsCSV()));
+document.getElementById("dlW1").addEventListener("click",()=>download("lingo_week1.csv",weekCSV(WEEK1)));
+document.getElementById("dlWN").addEventListener("click",()=>download("lingo_week"+WEEKN_NUM+".csv",weekCSV(WEEKN)));
+
+const fileInput=document.getElementById("file"), drop=document.getElementById("drop");
+drop.addEventListener("click",()=>fileInput.click());
+fileInput.addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f) return;
+  f.text().then(loadText);
+});
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{
+  const f=e.dataTransfer.files[0]; if(f) f.text().then(loadText);
+});
+</script>
+</body>
+</html>
