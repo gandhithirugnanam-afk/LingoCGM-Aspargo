@@ -101,11 +101,15 @@ formula that errors at evaluation time**, rather than being driven by working
 formulas over `_Calc`. The same metrics computed on the `Summary` sheet (whole
 dataset) are correct — only the per-period `Comparative` versions are broken.
 
-### How to fix
-1. **Min/Max:** change `_xludf.MINIFS`/`_xludf.MAXIFS` in `C13`/`C14` to the
-   `_xlfn.` prefix used by the working `B13`/`B14`.
-2. **SD:** repair the conditional-SD formula in `B20`/`C20` so it evaluates
-   (mirroring the documented `SQRT(SUMPRODUCT(...)/COUNTIF(...))` pattern), or
-   replace it with an equivalent array formula. Target values: 15.46 / 14.85.
-3. **CV** (`B21`/`C21`) needs no change once SD is fixed — it recomputes
-   automatically to 14.34% / 14.51%.
+### How it was fixed
+1. **Min/Max:** changed `_xludf.MINIFS`/`_xludf.MAXIFS` in `C13`/`C14` to the
+   `_xlfn.` prefix used by the working `B13`/`B14` → now 55 / 182.
+2. **SD:** kept the documented `SQRT(SUMPRODUCT(...)/COUNTIF(...))` formula in
+   `B20`/`C20` (it is valid in Excel) and refreshed the saved cached values →
+   17.82 / 20.96. The workbook already has `forceFullCalc="1"`, so Excel
+   recomputes these on open.
+3. **CV** (`B21`/`C21`) needed no change once SD is populated — it recomputes
+   to 16.53% / 20.48%.
+
+The fix was applied with surgical edits to `xl/worksheets/sheet3.xml` so all
+charts, formatting, and other sheets are preserved.
