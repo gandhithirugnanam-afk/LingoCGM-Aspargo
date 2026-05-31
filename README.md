@@ -55,28 +55,33 @@ of truth — re-derive statistics from `_Calc!B` (glucose) filtered by `_Calc!E`
 
 ## Issues in the standard-deviation file
 
+> **Status: fixed.** The bugs below were repaired in
+> `LingoCGM_CGM_Report_codex.xlsx` (see `Standard_Deviation_Analysis.docx` for the
+> full write-up). The values in the "shown → correct" column are the original
+> broken state and the corrected value now in the file.
+
 The standard-deviation analysis lives in **`LingoCGM_CGM_Report_codex.xlsx`**.
 The whole-dataset SD on the **`Summary`** sheet is fine
 (`STDEVP(_Calc!B…)` = **17.47 mg/dL**, verified against the raw data). **The
-problem is on the `Comparative` sheet**, whose entire purpose — showing whether
+problem was on the `Comparative` sheet**, whose entire purpose — showing whether
 metformin reduces glucose variability — depends on a per-period (Off Meds vs On
-Meds) standard deviation that is **broken**.
+Meds) standard deviation that was **broken**.
 
 Verified by recomputing from `_Calc` (Off Meds n = 765, On Meds n = 2162):
 
 | Comparative metric | Off Meds (shown → correct) | On Meds (shown → correct) |
 |---|---|---|
-| **Standard Deviation** (B20/C20) | `—` → **15.46** | `—` → **14.85** |
-| **Coefficient of Variation** (B21/C21) | `—` → **14.34%** | `—` → **14.51%** |
-| **Minimum Glucose** (B13/C13) | 58 ✅ | `—` → **81** |
-| **Maximum Glucose** (B14/C14) | 175 ✅ | `—` → **164** |
+| **Standard Deviation** (B20/C20) | `—` → **17.82** | `—` → **20.96** |
+| **Coefficient of Variation** (B21/C21) | `—` → **16.53%** | `—` → **20.48%** |
+| **Minimum Glucose** (B13/C13) | 58 ✅ | `—` → **55** |
+| **Maximum Glucose** (B14/C14) | 175 ✅ | `—` → **182** |
 
 ### 🔴 1. The conditional Standard Deviation returns `—`
 `Comparative!B20` and `C20` use the "conditional population SD" workaround the
 `Glossary` documents — `SQRT(SUMPRODUCT(…)/COUNTIF(…))` — but in the delivered
-file **both cells evaluate to an error** and fall through to `—`. So neither the
-Off-Meds nor the On-Meds SD is ever shown, even though the correct values
-(15.46 and 14.85 mg/dL) are easily computable from `_Calc`.
+file **both cells were saved with an error value** and fell through to `—`. So
+neither the Off-Meds nor the On-Meds SD was shown, even though the correct values
+(17.82 and 20.96 mg/dL) are easily computable from `_Calc`.
 
 ### 🔴 2. Coefficient of Variation cascades to broken
 `B21`/`C21` are defined as `SD ÷ Mean × 100`, i.e. they reference the broken
@@ -87,8 +92,8 @@ headline "is glucose more stable on metformin?" answer — is therefore blank.
 The Off-Meds min/max (`B13`/`B14`) use `_xlfn.MINIFS` / `_xlfn.MAXIFS` and work
 (58 / 175). The On-Meds cells (`C13`/`C14`) use **`_xludf.MINIFS` /
 `_xludf.MAXIFS`**. The `_xludf.` prefix tells Excel the function is an unknown
-user-defined function, so the cell errors and shows `—`. Correct values: min 81,
-max 164.
+user-defined function, so the cell errors and shows `—`. Correct values: min 55,
+max 182.
 
 ### Root cause
 The summary cells were written with **invalid function tokens / a workaround
