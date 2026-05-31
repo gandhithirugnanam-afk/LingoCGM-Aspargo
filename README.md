@@ -10,9 +10,15 @@ measuring the effect of **metformin** on glucose control and variability.
 
 ## Contents
 
-### `LingoCGM_CGM_Report_codex.xlsx` (~3.5 MB, 10 sheets)
+### `LingoCGM_CGM_Report_codex.xlsx` (~3.5 MB, 11 sheets)
 A single-subject CGM report driven entirely by live Excel formulas.
 - **`INPUT`** — raw pasted CGM export.
+- **`Daily Log`** — self-reported daily diary: body weight (lb), time medicine
+  taken, flavor variant, and taste / aftertaste ratings (1–5, 5 = best). Each
+  row auto-tags **Off Meds / Washout / On Meds** from `INPUT!I1`/`I2`, and a
+  side summary panel derives weight change (Off→On, lb and %), average dose time,
+  dosing-time consistency (SD in minutes), and average palatability. Tolerant of
+  missing days — leave any field blank.
 - **`_Calc`** — calculation engine (glucose in col B, med-period tag in col E);
   the source of truth for every other sheet.
 - **`Summary`** — whole-dataset metrics: mean, **SD (`STDEVP`)**, CV, GMI, eA1c,
@@ -20,15 +26,24 @@ A single-subject CGM report driven entirely by live Excel formulas.
 - **`Comparative`** — the headline **Off Meds vs On Meds** comparison.
 - **`Daily`**, **`AGP`**, **`Time Blocks`** — day-level / time-of-day rollups.
 - **`Glossary`**, **`Study Export`**, **`Review Notes`** — definitions, export
-  row, known-limitations log.
+  row, known-limitations log. `Study Export` now carries 11 extra daily-log
+  fields (cols **BX–CH**) for cohort transfer.
 
 Configure the analysis via `INPUT!I1` (metformin start date) and `INPUT!I2`
-(washout-buffer days).
+(washout-buffer days). The same two cells drive the `Daily Log` phase tags.
 
 ### `LingoCGM_Metformin_Study_Analysis.xlsx` (~76 KB, 8 sheets)
 A multi-participant study workbook: `Dashboard`, `Study_Setup`, `Source_Files`,
 `File_Intake`, `Pasted_Exports`, `Participant_Metrics`, `Cohort_Stats`
 (aggregated mean/SD/CV per group), `Safety_QA`.
+
+The daily-log fields added to each participant's `Study Export` (cols BX–CH)
+flow straight through the existing transfer chain: `File_Intake` (auto-links)
+and `Pasted_Exports` (manual paste) gain the same 11 columns (BX–CH),
+`Participant_Metrics` mirrors them in appended columns **CO–CY** (existing
+derived columns BX–CN are untouched), and `Cohort_Stats` gains four paired
+rows — Weight Change (lb), Weight Change %, Avg Taste, Avg Aftertaste — plus a
+"Tolerability & Weight" tile group on the `Dashboard`.
 
 ---
 
