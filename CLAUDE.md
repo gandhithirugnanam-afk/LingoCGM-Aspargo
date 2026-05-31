@@ -19,8 +19,13 @@ control and variability.
 
 ## File structure
 
-### `LingoCGM_CGM_Report_codex.xlsx` (10 sheets)
+### `LingoCGM_CGM_Report_codex.xlsx` (11 sheets)
 - **`INPUT`** (≤20,000 rows) — raw pasted CGM export (timestamp, glucose, etc.).
+- **`Daily Log`** — self-reported daily diary (weight in lb, time med taken,
+  flavor, taste & aftertaste 1–5). Col A = date, B = weight, C = dose time,
+  D = flavor, E = taste, F = aftertaste, G = notes, H = auto phase tag
+  (Off/Washout/On from `INPUT!I1`/`I2`). Summary panel in cols J–L (values in
+  **K3:K14**) feeds `Study Export` cols **BX–CH**.
 - **`_Calc`** (≤20,000 rows) — engine sheet. Col **B** = glucose (mg/dL), col
   **C** = date, col **D** = hour, col **E** = `Off Meds`/`On Meds`/washout tag,
   cols **G–N** = per-row risk/AUC helper terms. **This is the source of truth**
@@ -33,14 +38,19 @@ control and variability.
 - **`Glossary`** — metric definitions and methodology notes (incl. the
   "Conditional Standard Deviation Workaround").
 - **`Study Export`**, **`Review Notes`** — export row and known-limitations log.
+  `Study Export` carries 75 glucose fields (A–BW) **plus 11 daily-log fields
+  (BX–CH)** for cohort transfer.
 
 Config inputs live in `INPUT!I1` (metformin start date) and `INPUT!I2`
-(washout-buffer days, default 4).
+(washout-buffer days, default 4). These also drive the `Daily Log` phase tags.
 
 ### `LingoCGM_Metformin_Study_Analysis.xlsx` (8 sheets)
 `Dashboard` · `Study_Setup` · `Source_Files` · `File_Intake` · `Pasted_Exports`
 · `Participant_Metrics` · `Cohort_Stats` (aggregated mean/SD/CV per group) ·
-`Safety_QA`.
+`Safety_QA`. The daily-log fields ride the existing transfer chain: `File_Intake`
+and `Pasted_Exports` mirror cols **BX–CH**; `Participant_Metrics` appends them as
+**CO–CY** (the derived columns BX–CN are unchanged); `Cohort_Stats` adds four
+paired rows (Weight Change lb / %, Avg Taste, Avg Aftertaste).
 
 ## Working with these files
 
