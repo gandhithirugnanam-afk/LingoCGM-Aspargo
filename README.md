@@ -113,3 +113,45 @@ dataset) are correct — only the per-period `Comparative` versions are broken.
 
 The fix was applied with surgical edits to `xl/worksheets/sheet3.xml` so all
 charts, formatting, and other sheets are preserved.
+
+## Follow-up improvements (robustness + statistics)
+
+A second round of edits to `LingoCGM_CGM_Report_codex.xlsx` (sheets `Summary`
+and `Comparative`), again via surgical XML edits that preserve all charts.
+
+**Refreshed stale `—` caches (A).** Several formula cells were saved with a
+stale error value (`—`) even though their formulas were valid — they only
+recovered when reopened in desktop Excel. Re-populated the correct cached values
+so the file reads correctly in any viewer (openpyxl, web preview, etc.):
+`Summary!B16` (Hyperglycemia Burden Score), the Comparative HBS / SD / CV /
+min-max delta cells (`B16`, `C16`, `D13`, `D14`, `D16`, `D20`, `D21`), and the
+J-Index row (`B69`/`C69`/`D69`), which was blank only because it depends on the
+SD cells. (A few per-day AUC cells — `Summary!B49`, `Comparative!B42`/`B43` —
+were left to Excel's `forceFullCalc` recalculation on open.)
+
+**Hardened the formulas (B).** Rewrote the conditional standard-deviation and
+HBS formulas (`B16`/`C16`, `B20`/`C20`) to an **IF-free** `SUMPRODUCT` form. The
+original `SUMPRODUCT(…*IF(ISNUMBER(x),…)…)` pattern is exactly what the generating
+tool kept mis-evaluating into `—`; the IF-free form evaluates cleanly in Excel
+**and** LibreOffice/openpyxl. (Verified safe: column B of `_Calc` contains zero
+text cells.) Also confirmed no `_xludf.` tokens remain anywhere.
+
+**Added statistical significance (C).** A new block in `Comparative` rows 78–90
+tests the mean-glucose difference (On Meds vs Off Meds), Welch two-sample with a
+normal approximation (Welch df is in the thousands, so *t* ≈ *z*):
+
+| Quantity | Value |
+|---|---|
+| Off / On n | 765 / 2162 readings |
+| Off / On sample SD (`STDEV.S`) | 17.83 / 20.96 mg/dL |
+| Mean difference (On − Off) | **−5.45 mg/dL** |
+| Standard error | 0.79 mg/dL |
+| z statistic | −6.93 |
+| p-value (two-sided) | ≈ 4×10⁻¹² |
+| 95% confidence interval | **[−6.99, −3.91] mg/dL** |
+
+The block uses **sample SD** (more defensible than population SD for a two-group
+comparison) and carries an explicit **caveat**: CGM readings minutes apart are
+autocorrelated, so the effective sample size is far smaller than *n* and this
+p-value overstates significance — treat as exploratory, aggregating to daily
+means before any formal inference.
