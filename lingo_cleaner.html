@@ -22,8 +22,10 @@
         padding:16px;margin-bottom:16px}
   .card h2{margin:0 0 12px;font-size:15px;color:var(--accent)}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-  input[type=number]{width:90px;background:var(--panel2);border:1px solid var(--line);
-        color:var(--ink);border-radius:6px;padding:6px 8px;font-size:14px}
+  input[type=number],input[type=datetime-local]{background:var(--panel2);
+        border:1px solid var(--line);color:var(--ink);border-radius:6px;
+        padding:6px 8px;font-size:14px;color-scheme:dark}
+  input[type=number]{width:90px}
   .ctl{display:flex;flex-direction:column}
   .ctls{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end}
   button{background:var(--accent);color:#06223f;border:0;border-radius:7px;
@@ -86,8 +88,6 @@
         <input id="rise" type="number" value="30" min="5"></div>
       <div class="ctl"><label>Meal rise window (min)</label>
         <input id="window" type="number" value="60" min="15" step="5"></div>
-      <div class="ctl"><label>Compare Week 1 vs Week #</label>
-        <input id="weekN" type="number" value="2" min="2" step="1"></div>
       <div class="ctl"><button id="run">Clean &amp; analyze</button></div>
     </div>
     <p style="margin:12px 0 0"><small class="note">
@@ -135,22 +135,34 @@
     </div>
 
     <div class="card">
-      <h2>7. Week comparison <span id="weekrange" class="pill good"></span></h2>
-      <p><small class="note">Week 1 is the first 7 days of clean data; Week&nbsp;N is the
-        chosen later week. Use this to contrast, e.g., an off-meds week with an on-meds week.</small></p>
+      <h2>7. Off Meds vs On Meds <span id="weekrange" class="pill good"></span></h2>
+      <p><small class="note">Pick the start and end date/time for each phase. Only clean
+        readings inside each window are compared — use this to contrast time off metformin
+        with time on it. Defaults span the first and last few days of your data.</small></p>
+      <div class="ctls" style="margin-bottom:14px">
+        <div class="ctl"><label>Off Meds — start</label>
+          <input id="offStart" type="datetime-local" step="60"></div>
+        <div class="ctl"><label>Off Meds — end</label>
+          <input id="offEnd" type="datetime-local" step="60"></div>
+        <div class="ctl"><label>On Meds — start</label>
+          <input id="onStart" type="datetime-local" step="60"></div>
+        <div class="ctl"><label>On Meds — end</label>
+          <input id="onEnd" type="datetime-local" step="60"></div>
+        <div class="ctl"><button id="cmp" class="ghost">Compare</button></div>
+      </div>
       <div class="legend">
-        <span><i style="background:var(--accent)"></i>Week 1</span>
-        <span><i style="background:var(--meal)"></i>Week N</span>
+        <span><i style="background:var(--accent)"></i>Off Meds</span>
+        <span><i style="background:var(--meal)"></i>On Meds</span>
       </div>
       <canvas id="wchart" height="260"></canvas>
       <div class="scroll" style="margin-top:12px">
         <table id="wtable"><thead><tr>
-          <th>Metric</th><th>Week 1</th><th>Week N</th><th>Δ (N − 1)</th>
+          <th>Metric</th><th>Off Meds</th><th>On Meds</th><th>Δ (On − Off)</th>
         </tr></thead><tbody></tbody></table>
       </div>
       <div style="margin-top:12px">
-        <button id="dlW1" class="ghost">⬇ Week 1 CSV</button>
-        <button id="dlWN" class="ghost">⬇ Week N CSV</button>
+        <button id="dlW1" class="ghost">⬇ Off Meds CSV</button>
+        <button id="dlWN" class="ghost">⬇ On Meds CSV</button>
       </div>
     </div>
 
@@ -291,15 +303,37 @@ function buildStats(){
     `<div class="stat"><div class="v">${c[1]}</div><div class="k">${c[0]}</div></div>`).join("");
 }
 
-/* ---------- week slicing & comparison ---------- */
-let WEEK1=[], WEEKN=[], WEEKN_NUM=2;
-function weekStart(){ return CLEAN.length ? CLEAN[0].t.getTime() : 0; }
-// readings whose offset from data-start falls in week `n` (1-based, 7-day blocks)
-function sliceWeek(n){
-  const t0=weekStart(), a=t0+(n-1)*7*86400000, b=t0+n*7*86400000;
-  return CLEAN.filter(r=>r.t.getTime()>=a && r.t.getTime()<b);
+/* ---------- Off Meds vs On Meds comparison ---------- */
+let OFF=[], ON=[], OFF_SPAN=0, ON_SPAN=0;
+// value of a datetime-local input as ms (local time), or null if blank/invalid
+function dtVal(id){
+  const s=document.getElementById(id).value;
+  if(!s) return null;
+  const d=new Date(s);            // datetime-local is interpreted in local tz
+  return isNaN(d.getTime())?null:d.getTime();
 }
-function weekMetrics(arr){
+// format a Date as the value a datetime-local input expects (local, minute res)
+function toLocalInput(d){
+  const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// prefill sensible defaults once: Off = first 3 days, On = last 3 days
+function seedPhaseDefaults(){
+  if(!CLEAN.length) return;
+  const t0=CLEAN[0].t, t1=CLEAN[CLEAN.length-1].t, day=86400000;
+  const set=(id,d)=>{ const el=document.getElementById(id); if(!el.value) el.value=toLocalInput(d); };
+  set("offStart", t0);
+  set("offEnd",   new Date(Math.min(t0.getTime()+3*day, t1.getTime())));
+  set("onStart",  new Date(Math.max(t1.getTime()-3*day, t0.getTime())));
+  set("onEnd",    t1);
+}
+function slicePhase(startId,endId){
+  const a=dtVal(startId), b=dtVal(endId);
+  if(a==null||b==null) return [];
+  const lo=Math.min(a,b), hi=Math.max(a,b);
+  return CLEAN.filter(r=>{ const t=r.t.getTime(); return t>=lo && t<=hi; });
+}
+function phaseMetrics(arr){
   if(!arr.length) return null;
   const g=arr.map(r=>r.v), n=g.length, mean=g.reduce((a,b)=>a+b,0)/n;
   const sd=Math.sqrt(g.reduce((a,b)=>a+(b-mean)**2,0)/n);
@@ -310,14 +344,12 @@ function weekMetrics(arr){
     min:Math.min(...g), max:Math.max(...g)
   };
 }
-function buildWeeks(){
-  WEEKN_NUM=Math.max(2,+v("weekN")||2);
-  WEEK1=sliceWeek(1); WEEKN=sliceWeek(WEEKN_NUM);
-  const m1=weekMetrics(WEEK1), mn=weekMetrics(WEEKN);
-  const start=new Date(weekStart());
-  const wnStart=new Date(weekStart()+(WEEKN_NUM-1)*7*86400000);
+function buildWeeks(){           // (name kept; builds the phase comparison)
+  seedPhaseDefaults();
+  OFF=slicePhase("offStart","offEnd"); ON=slicePhase("onStart","onEnd");
+  const mOff=phaseMetrics(OFF), mOn=phaseMetrics(ON);
   document.getElementById("weekrange").textContent=
-    `W1 from ${fmtDay(start)} · W${WEEKN_NUM} from ${fmtDay(wnStart)}`;
+    `Off n=${OFF.length} · On n=${ON.length}`;
   const rows=[
     ["Readings","n", x=>x.n],
     ["Mean glucose","mg/dL", x=>x.mean.toFixed(0)],
@@ -330,12 +362,12 @@ function buildWeeks(){
     ["Min / Max","mg/dL", x=>x.min+" / "+x.max],
   ];
   const tb=document.querySelector("#wtable tbody");
-  if(!m1||!mn){
-    tb.innerHTML=`<tr><td colspan="4"><small class="note">Not enough clean data for
-      Week 1 and Week ${WEEKN_NUM}. Lower the week number or check the date span.</small></td></tr>`;
+  if(!mOff||!mOn){
+    tb.innerHTML=`<tr><td colspan="4"><small class="note">Pick start/end times that
+      contain clean readings for both phases (check the date span and warm-up setting).</small></td></tr>`;
   } else {
     tb.innerHTML=rows.map(r=>{
-      const a=r[2](m1), b=r[2](mn);
+      const a=r[2](mOff), b=r[2](mOn);
       let delta="";
       const na=parseFloat(a), nb=parseFloat(b);
       if(!isNaN(na)&&!isNaN(nb)&&r[0]!=="Min / Max"){
@@ -347,17 +379,18 @@ function buildWeeks(){
   }
   drawWeeks();
 }
-function fmtDay(d){const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;}
-// overlay both weeks on a shared 0–7 day x-axis (aligned by day-into-week)
+// overlay both phases on a shared 0→span x-axis (aligned by elapsed time into phase)
 function drawWeeks(){
   const cv=document.getElementById("wchart");
   const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=260;
   cv.width=W*dpr; cv.height=H*dpr;
   const ctx=cv.getContext("2d"); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
   const padL=44,padR=12,padT=12,padB=22;
-  const all=WEEK1.concat(WEEKN);
+  const all=OFF.concat(ON);
   const vhi=all.length?Math.max(200,...all.map(r=>r.v))+10:250, vlo=40;
-  const X=day=>padL+(day/7)*(W-padL-padR);
+  const span=id=>{const a=id; return a.length? (a[a.length-1].t-a[0].t)/86400000 : 0;};
+  const maxDays=Math.max(span(OFF),span(ON),0.5);
+  const X=day=>padL+(day/maxDays)*(W-padL-padR);
   const Y=val=>padT+(1-(val-vlo)/(vhi-vlo))*(H-padT-padB);
   ctx.fillStyle="rgba(57,192,122,.08)";
   ctx.fillRect(padL,Y(180),W-padL-padR,Y(70)-Y(180));
@@ -365,7 +398,8 @@ function drawWeeks(){
   [55,100,150,200,250,300].forEach(gv=>{ if(gv>vhi)return;
     ctx.beginPath();ctx.moveTo(padL,Y(gv));ctx.lineTo(W-padR,Y(gv));ctx.stroke();
     ctx.fillText(gv,6,Y(gv)+3); });
-  for(let d=1;d<7;d++){ ctx.fillText("d"+d,X(d)-6,H-7); }
+  const dstep=maxDays>6?2:1;
+  for(let d=dstep;d<maxDays;d+=dstep){ ctx.fillText("d"+d,X(d)-6,H-7); }
   const plot=(arr,color)=>{
     if(!arr.length) return;
     const t0=arr[0].t.getTime();
@@ -379,7 +413,7 @@ function drawWeeks(){
     }
     ctx.stroke();
   };
-  plot(WEEK1,"#4ea1ff"); plot(WEEKN,"#c77dff");
+  plot(OFF,"#4ea1ff"); plot(ON,"#c77dff");
 }
 function weekCSV(arr){
   let s="Time of Glucose Reading,Measurement(mg/dL),Sensor\n";
@@ -504,8 +538,9 @@ document.getElementById("run").addEventListener("click",run);
 window.addEventListener("resize",()=>{ if(CLEAN.length){ draw(); drawWeeks(); } });
 document.getElementById("dlClean").addEventListener("click",()=>download("lingo_cleaned.csv",cleanCSV()));
 document.getElementById("dlMeals").addEventListener("click",()=>download("lingo_meals.csv",mealsCSV()));
-document.getElementById("dlW1").addEventListener("click",()=>download("lingo_week1.csv",weekCSV(WEEK1)));
-document.getElementById("dlWN").addEventListener("click",()=>download("lingo_week"+WEEKN_NUM+".csv",weekCSV(WEEKN)));
+document.getElementById("cmp").addEventListener("click",buildWeeks);
+document.getElementById("dlW1").addEventListener("click",()=>download("lingo_off_meds.csv",weekCSV(OFF)));
+document.getElementById("dlWN").addEventListener("click",()=>download("lingo_on_meds.csv",weekCSV(ON)));
 
 const fileInput=document.getElementById("file"), drop=document.getElementById("drop");
 drop.addEventListener("click",()=>fileInput.click());
